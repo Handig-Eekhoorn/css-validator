@@ -26,6 +26,8 @@ public class RGBA extends RGB {
 
     CssValue va;
 
+	private ApplContext ac;
+
     public static final CssValue filterAlpha(ApplContext ac, CssValue val)
             throws InvalidParamException {
         if (val.getRawType() == CssTypes.CSS_CALC) {
@@ -73,6 +75,7 @@ public class RGBA extends RGB {
     public final void setAlpha(ApplContext ac, CssValue val)
             throws InvalidParamException {
         output = null;
+        this.ac = ac;
         va = filterAlpha(ac, val);
     }
 
@@ -138,7 +141,22 @@ public class RGBA extends RGB {
     public String toString() {
         if (output == null) {
             StringBuilder sb = new StringBuilder();
-            if (isCss3) {
+            if (this.ac==null || this.ac.isHandigEekhoornFixes()) {
+            	if (va!=null) {
+            		sb.append(RGBA.functionname).append('(');
+            	}else {
+            		sb.append(RGB.functionname).append('(');
+            	}
+                sb.append(vr).append(", ");
+                sb.append(vg).append(", ");
+                sb.append(vb);
+                if (va!=null) {
+                	sb.append(", ");
+                	sb.append(va);
+                }
+                sb.append(')');
+                
+            }else if (isCss3) {
                 sb.append(RGB.functionname).append('(');
                 sb.append(vr).append(' ');
                 sb.append(vg).append(' ').append(vb);
