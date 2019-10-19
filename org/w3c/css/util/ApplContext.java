@@ -90,6 +90,7 @@ public class ApplContext {
     URL fakeurl = null;
 
     URL referrer = null;
+	private boolean handigEekhoornFixes;
 
     /**
      * Creates a new ApplContext
@@ -574,4 +575,13 @@ public class ApplContext {
     public URL getReferrer() {
         return referrer;
     }
+
+	public void setHandigEekhoornFixes(boolean handigEekhoornFixes) {
+		this.handigEekhoornFixes = handigEekhoornFixes;
+	}
+
+	public boolean isHandigEekhoornFixes() {
+		return handigEekhoornFixes;
+	}
+	
 }
