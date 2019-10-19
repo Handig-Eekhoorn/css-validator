@@ -46,9 +46,7 @@ public class AtRuleMedia extends org.w3c.css.atrules.css.AtRuleMedia {
             }
         }
         if (medium == null) {
-            if(allMedia.isEmpty()) {
-            	allMedia.add(media);
-            }
+            allMedia.add(media);
             return this;
         }
         medium = medium.toLowerCase();
