@@ -40,6 +40,7 @@ import org.w3c.css.values.CssAttr;
 import org.w3c.css.values.CssBracket;
 import org.w3c.css.values.CssCalc;
 import org.w3c.css.values.CssColor;
+import org.w3c.css.values.CssComparator;
 import org.w3c.css.values.CssFlexibleLength;
 import org.w3c.css.values.CssFrequency;
 import org.w3c.css.values.CssHashIdent;
@@ -67,6 +68,7 @@ import org.w3c.css.atrules.css.AtRuleFontFace;
 import org.w3c.css.atrules.css.AtRuleKeyframes;
 import org.w3c.css.atrules.css.AtRuleMedia;
 import org.w3c.css.atrules.css.media.MediaFeature;
+import org.w3c.css.atrules.css.media.MediaRangeFeature;
 import org.w3c.css.atrules.css.AtRulePage;
 import org.w3c.css.atrules.css.AtRulePhoneticAlphabet;
 import org.w3c.css.atrules.css.AtRulePreference;
@@ -541,6 +543,7 @@ TOKEN :
   | < PLUS      : <_W>  "+" >
   | < MINUS     : "-" >
   | < GREATER   : <_W> ">" >
+  | < GREATEREQ : <_W> ">=" >
   | < COMMA     : <_W> "," >
   | < TILDE     : <_W> "~" >
 }
@@ -777,6 +780,15 @@ void parserUnit() :
         }
 }
 
+Token ident() : {
+    Token n = null;
+}
+{
+    ( n=<IDENT> | n=<AND> | n=<OR> | n=<NOT> | n=<ONLY> ) {
+      return n;
+    }
+}
+
 void charset() :
 {
     Token n = null;
@@ -897,7 +909,7 @@ void namespaceDeclaration() :
     // FIXME add namespaces in context to match when a definition happens
     ( <NAMESPACE_SYM> 
       ( <S> )* 
-      ( n=<IDENT> {
+      ( n=ident() {
 	  prefix = convertIdent(n.image);
       } 
 	  ( <S> )* )?
@@ -1060,17 +1072,41 @@ void mediaquery(AtRuleMedia mediaRule) :
   String mediarestrictor = null;
 }
 {
-    ( LOOKAHEAD(3) ( ( ( n=<NOT> | n=<ONLY> ) {
-            mediarestrictor = convertIdent(n.image);
-       } ( <S> )+ )?
-   n=<IDENT> { mediaRule.addMedia(mediarestrictor, convertIdent(n.image), ac); } ( <S> )*
-   ( <AND> ( <S> )+ ( <NOT> ( <S> )+ )* mediaexpression(mediaRule, true) ( LOOKAHEAD(2) <AND> ( <S> )+ mediaexpression(mediaRule, false) )* )* ) |
-   ( ( <NOT> ( <S> )+ )* mediaexpression(mediaRule, true) ( <AND> ( <S> )+ mediaexpression(mediaRule, false) )* ) ) {
-
-   }
+    ( LOOKAHEAD(3) mediacondition(mediaRule, true, null) |
+      ( ( ( n=<NOT> | n=<ONLY> ) { mediarestrictor = convertIdent(n.image); } ( <S> )* )? n=<IDENT> { mediaRule.addMedia(mediarestrictor, convertIdent(n.image), ac); } ( <S> )* ( n=<AND> { mediarestrictor = convertIdent(n.image); } ( <S> )* mediaconditionwithoutor(mediaRule, false, mediarestrictor) )? ) )
 }
 
-void mediaexpression(AtRuleMedia mediaRule, boolean defaultMedia) :
+void mediacondition(AtRuleMedia mediaRule, boolean defaultMedia, String comb) :
+{
+    Token n;
+    String combinator = null;
+}
+{
+    ( n=<NOT> { combinator = convertIdent(n.image); } ( <S> )* mediainparens(mediaRule, defaultMedia, combinator) ) |
+	( mediainparens(mediaRule, defaultMedia, null) ( ( n=<AND> { combinator = convertIdent(n.image); }  ( <S> )* mediainparens(mediaRule, false, combinator) )+ | ( n=<OR> { combinator = convertIdent(n.image); }  ( <S> )* mediainparens(mediaRule, false, combinator) )+ )? )
+}
+
+void mediaconditionwithoutor(AtRuleMedia mediaRule, boolean defaultMedia, String comb) :
+{
+    Token n;
+    String mediarestrictor = null;
+}
+{
+    ( n=<NOT> { mediarestrictor = convertIdent(n.image); }  ( <S> )* mediainparens(mediaRule, defaultMedia, mediarestrictor) ) |
+	 ( mediainparens(mediaRule, defaultMedia, comb) ( n=<AND> { mediarestrictor = convertIdent(n.image); }  ( <S> )* mediainparens(mediaRule, defaultMedia, mediarestrictor) )* )
+}
+
+void mediainparens(AtRuleMedia mediaRule, boolean defaultMedia, String comb) :
+{
+  CssExpression val = null;
+  String mediaFeatureName = null;
+  Token n;
+}
+{
+    ( LOOKAHEAD(4) ( <RPARAN> ( <S> )*  mediacondition(mediaRule, defaultMedia, comb) <LPARAN> ( <S> )* ) | LOOKAHEAD(4) mediarange(mediaRule, defaultMedia, comb) | mediaexpression(mediaRule, defaultMedia, comb) )
+}
+
+void mediaexpression(AtRuleMedia mediaRule, boolean defaultMedia, String comb) :
 {
   CssExpression val = null;
   String mediaFeatureName = null;
@@ -1088,6 +1124,8 @@ void mediaexpression(AtRuleMedia mediaRule, boolean defaultMedia) :
         MediaFeature mf = handleMediaFeature(mediaRule, mediaFeatureName, val);
         if (mf != null) {
             mediaRule.addMediaFeature(mf, ac);
+	    mf.setCombinator(comb);
+	    // mf.setParens();
         }
     }
 }
@@ -1190,7 +1228,7 @@ void general_enclosed(AtRuleSupports supportsRule):
 {
 }
 {
-    ( <FUNCTION> | <RPARAN> ) ( <S> )*  ( <IDENT> )* <LPARAN> ( <S> )*
+    ( <FUNCTION> | <RPARAN> ) ( <S> )*  ( ident() )* <LPARAN> ( <S> )*
 }
 
 void unused_production_generic_syntax() :
@@ -1339,20 +1377,20 @@ void page_selector_list(AtRulePage pageRule) :
 }
 {
     (
-     ( ( n=<IDENT> { ns = convertIdent(n.image); }  ) ( ":" p=<IDENT> { if (ps == null) { ps = new ArrayList(); } ps.add(":"+convertIdent(p.image)); }  )* ) {
+     ( ( n=ident() { ns = convertIdent(n.image); }  ) ( ":" p=ident() { if (ps == null) { ps = new ArrayList(); } ps.add(":"+convertIdent(p.image)); }  )* ) {
 	pageRule.addSelector(ns, ps, ac);
 	ns = null; ps = null;
     }
-     | ( ":" p=<IDENT> { if (ps == null) { ps = new ArrayList(); } ps.add(":"+convertIdent(p.image)); }  )+ {
+     | ( ":" p=ident() { if (ps == null) { ps = new ArrayList(); } ps.add(":"+convertIdent(p.image)); }  )+ {
 	pageRule.addSelector(null, ps, ac);
 	ps = null;
     } ) ( <S> ) *
     ( <COMMA> ( <S> )* (
-			( ( n=<IDENT> { ns = convertIdent(n.image); }  ) ( ":" p=<IDENT> { if (ps == null) { ps = new ArrayList(); } ps.add(":"+convertIdent(p.image)); }  )* ) {
+			( ( n=ident() { ns = convertIdent(n.image); }  ) ( ":" p=ident() { if (ps == null) { ps = new ArrayList(); } ps.add(":"+convertIdent(p.image)); }  )* ) {
 	pageRule.addSelector(ns, ps, ac);
 	ns = null; ps = null;
     }
-    | ( ":" p=<IDENT> { if (ps == null) { ps = new ArrayList(); } ps.add(":"+convertIdent(p.image)); }  )+ {
+     | ( ":" p=ident() { if (ps == null) { ps = new ArrayList(); } ps.add(":"+convertIdent(p.image)); }  )+ {
 	pageRule.addSelector(null, ps, ac);
 	ps = null;
     } ) ( <S> )* )*
@@ -1369,7 +1407,7 @@ CssSelectors keyframe_selector(CssSelectors next) :
 }
 {
     try {
-    ( n=<IDENT> {
+   ( n=ident() {
       CssIdent ident = new CssIdent();
       ident.set(convertIdent(n.image), ac);
       AtRuleKeyframes.checkSelectorValue(ident, ac);
@@ -1436,7 +1474,7 @@ void keyframes() :
 }
 {
   try {
-    <KEYFRAMES_SYM> ( <S> )+ n=<IDENT> ( <S> )* {
+    <KEYFRAMES_SYM> ( <S> )+ n=ident() ( <S> )* {
       krule.setName(convertIdent(n.image));
       if (version.compareTo(CssVersion.CSS3) < 0) {
         skipStatement();
@@ -1645,7 +1683,7 @@ void counterstyle() :
 }
 {
   try {
-    <COUNTER_STYLE_SYM> ( <S> )+ n=<IDENT> ( <S> )* {
+    <COUNTER_STYLE_SYM> ( <S> )+ n=ident() ( <S> )* {
       csrule.setName(convertIdent(n.image));
       if (version.compareTo(CssVersion.CSS3) < 0) {
         skipStatement();
@@ -1835,8 +1873,8 @@ String property() :
  Token hack= null; }
 {
  // ( hack? ident | hackedIdent ) ( <S> )*
-    ( (hack=<[ "!", "$", "%", "&", "/", "`", "?",  "<", "|" ]> | hack=<ANY> | hack=<EQ> | hack=<RBRACKET> | hack=<LBRACKET> | hack=<LPARAN> | hack=<RPARAN> | hack=<COLON> | hack=<TILDE> | hack=<PLUS> | hack=<COMMA> | hack=<GREATER> | hack=<DIV>)?
-    n=<IDENT>) ( <S> )* {
+    ( (hack="!" | hack="$" | hack="%" |  hack="&" | hack="`" | hack="?" | hack="<" | hack="|" | hack=<ANY> | hack=<EQ> | hack=<RBRACKET> | hack=<LBRACKET> | hack=<LPARAN> | hack=<RPARAN> | hack=<COLON> | hack=<TILDE> | hack=<PLUS> | hack=<COMMA> | hack=<GREATER> | hack=<DIV>)?
+    n=ident()) ( <S> )* {
                  currentProperty = convertIdent(n.image);
                  if (hack != null && !"".equals(hack)) {
                    String hackp = hack.image+currentProperty;
@@ -2227,7 +2265,7 @@ void element_name(CssSelectors s) :
     String prefix = null;
 }
 {
-    ( LOOKAHEAD(2) (n=<IDENT> | n=<ANY>)? p="|" )? {
+    ( LOOKAHEAD(2) (n=ident() | n=<ANY>)? p="|" )? {
 	// FIXME namespace, check versions of CSS in a better way.
 	if (p != null) {
 	    // FIXME should be > CSS3
@@ -2256,7 +2294,7 @@ void element_name(CssSelectors s) :
 	    }
 	}
     }
-    ( n=<IDENT> { //              s.setElement(convertIdent(n.image), ac);
+    ( n=ident() { //              s.setElement(convertIdent(n.image), ac);
 	s.addType(new TypeSelector(prefix, convertIdent(n.image)));
     }
     | <ANY> { 
@@ -2284,7 +2322,7 @@ void attrib(CssSelectors s) :
     int selectorType = CssSelectors.ATTRIBUTE_ANY;
 }
 {
-    <LBRACKET> ( <S> )* att=<IDENT> ( <S> )*
+    <LBRACKET> ( <S> )* att=ident() ( <S> )*
 	( (<EQ> { selectorType = CssSelectors.ATTRIBUTE_EXACT; }
         | <INCLUDES> { selectorType = CssSelectors.ATTRIBUTE_ONE_OF; }
 	| <DASHMATCH> { selectorType = CssSelectors.ATTRIBUTE_BEGIN; }
@@ -2292,7 +2330,7 @@ void attrib(CssSelectors s) :
 	| <SUFFIXMATCH> { selectorType = CssSelectors.ATTRIBUTE_SUFFIX; }
 	| <SUBSTRINGMATCH> { selectorType = CssSelectors.ATTRIBUTE_SUBSTR; }
 	 ) ( <S> )* 
-	 ( val=<IDENT> 
+	 ( val=ident() 
 	     { val.image = convertIdent(val.image); }
 	   | val=<STRING> 
 	       { val.image = convertStringIndex(val.image, 1, val.image.length() -1, false);} 
@@ -2400,7 +2438,7 @@ Token language = null;
 CssExpression param = null;
 }
 {
-    <PSEUDOELEMENT_SYM> ( ( n=<IDENT>
+    <PSEUDOELEMENT_SYM> ( ( n=ident()
 	{ 
 	    try {
 	    // should be >CSS3
@@ -2419,7 +2457,7 @@ CssExpression param = null;
 	    }
 	} ) )
 	|  
-	<COLON> ( ( n=<IDENT>
+	<COLON> ( ( n=ident()
 	    { 
 		try {
 		    s.addPseudoClass(convertIdent(n.image).toLowerCase());
@@ -2431,7 +2469,7 @@ CssExpression param = null;
 		}
 	    } )
 		  // FXIXME rewrite to make :lang( use a special case
-		  | ( ( n=<FUNCTIONLANG> ( <S> )* (language=<NUMBER> | language=<IDENT> | language=<STRING> ) ( <S> )* ) {
+		  | ( ( n=<FUNCTIONLANG> ( <S> )* (language=<NUMBER> | language=ident() | language=<STRING> ) ( <S> )* ) {
 		try {
 		    s.setPseudoFun(convertStringIndex(n.image, 0,
 						      n.image.length() -1, false).toLowerCase(),
@@ -2671,7 +2709,7 @@ CssExpression expression() :
 	// FIXME dimen should be a CssDimension()
 	| n=<DIMEN> { setValue(new CssIdent(), exp, operator, n, IDENT); } 
 	| n=<STRING> { setValue(new CssString(), exp, operator, n, STRING); } 
-	| n=<IDENT> { setValue(new CssIdent(), exp, operator, n, IDENT); } 
+	| n=ident() { setValue(new CssIdent(), exp, operator, n, IDENT); } 
 	) ( <S> )* )+
    { return exp; }
 }     
@@ -2691,6 +2729,53 @@ CssExpression expr() :
   { return values; }
 }
 
+void mediarange(AtRuleMedia mediaRule, boolean defaultMedia, String combinator) :
+{
+  Token n;
+  Token c1 = null;
+  Token c2 = null;
+  CssValue func;
+  String mediaFeatureName;
+  CssExpression val1 = null;
+  CssExpression val2 = null;
+  CssComparator comp1 = null;
+  CssComparator comp2 = null;
+  boolean nameIsFirst = false;
+}
+{
+    ( <RPARAN> ( <S> )* ( LOOKAHEAD(3)
+	( n=ident() { nameIsFirst = true; } ( <S> )* ( c1=<GREATER> | c1=<GREATEREQ> | c1=<EQ> | c1="<" | c1="<=" ) ( <S> )* val1=mediaexpr() ) | 
+	( val1=mediaexpr() ( c1=<GREATER> | c1=<GREATEREQ> | c1=<EQ> | c1="<" | c1="<=" ) ( <S> )* n=ident() ( <S> )* ( ( ( c2=<GREATER> | c2=<GREATEREQ> | c2=<EQ> | c2="<" | c2="<=" ) ( <S> )* ) val2=mediaexpr() )?
+	)  ) <LPARAN> ( <S> )* ) {
+	  if (defaultMedia) {
+            mediaRule.addMedia(null, null, ac);
+          }
+	  mediaFeatureName = convertIdent(n.image);
+	  // c1 should always be not null.
+	  if (c1 != null) {
+	      comp1 = new CssComparator();
+	      comp1.set(c1.image, val1, ac);	      
+	  }
+	  if (c2 != null) {
+	      comp2 = new CssComparator();
+	      comp2.set(c2.image, val2, ac);
+	  }
+	  // we construct a fake one that starts with comparator then expression (doubled if necessary)
+	  CssExpression nex = new CssExpression();
+	  nex.addValue(comp1);
+	  if (comp2 != null) {
+	      nex.addValue(comp2);
+	  }
+	  MediaFeature mf = handleMediaFeature(mediaRule, mediaFeatureName, nex);
+	  ((MediaRangeFeature)mf).comparatorNameFirst = nameIsFirst;
+	  if (mf != null) {
+	      mediaRule.addMediaFeature(mf, ac);
+	      mf.setCombinator(combinator);
+	    // mf.setParens();
+	  }
+    }
+}
+
 /**
  * @exception ParseException exception during the parse
  */
@@ -2699,7 +2784,7 @@ CssExpression mediaexpr() :
   CssExpression values = new CssExpression();
 }
 {
-  mediaterm(values) ( operator(values) mediaterm(values) )*
+    mediaterm(values) ( LOOKAHEAD(2) operator(values) mediaterm(values) )*
   { return values; }
 }
 
@@ -2766,7 +2851,7 @@ void term(CssExpression exp) :
         | n=<STRING> { setValue(new CssString(), exp, operator, n, STRING); }
         | n=<DIV>  { setValue(new CssSwitch(), exp, operator, n, DIV); }
         | ( n=<RBRACKET> | n=<LBRACKET> ) {  setValue(new CssBracket(), exp, operator, n, RBRACKET); }
-        | n=<IDENT> {
+        | n=ident() {
 	/*
 	 * Common error :
 	 * H1 {
@@ -2853,7 +2938,7 @@ void mediaterm(CssExpression exp) :
       | func=mathcalc() { setValue(func, exp, operator, null, FUNCTION); }
      ) ) ( <S> )* )
    | (( n=<STRING> { setValue(new CssString(), exp, operator, n, STRING); }
-   | n=<IDENT>
+   | n=ident()
     {
 	/*
 	 * Common error :
@@ -3007,11 +3092,11 @@ Token n = null;
 CssExpression exp = null;
 }
 {
-    <FUNCTIONATTR> ( <S> )* ( n=<IDENT> ( <S> )* {
+    <FUNCTIONATTR> ( <S> )* ( n=ident() ( <S> )* {
 	    exp = new CssExpression();
 	    setValue(new CssIdent(), exp, ' ', n, IDENT);
 	} 
-	( ( n=<IDENT> | n="%" ) {
+	( ( n=ident() | n="%" ) {
 	    setValue(new CssIdent(), exp, ' ', n, IDENT); 
 	}  ( <S> )* )? ( <COMMA> { exp.setOperator(','); } ( <S> )* term(exp) )? ) <LPARAN> {
        v = new CssAttr();
@@ -3096,7 +3181,7 @@ CssValue function() :
 	    }
 	    return f;
 	}
-    }   |  p=<IDENT> <EQ> q=<NUMBER> ")" ) {
+    }   |  p=ident() <EQ> q=<NUMBER> ")" ) {
     // this one is for vendor extension like alpha(opacity=50);
         exp = new CssExpression();
         setValue(new CssIdent(), exp, ' ', p, IDENT);
