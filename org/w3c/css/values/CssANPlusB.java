@@ -206,7 +206,13 @@ public class CssANPlusB extends CssValue {
                 sb.append('n');
             }
             if (b != null) {
+<<<<<<< PR-ignore_null_bytes_for_nth-child_selectors
                 sb.append(operator);
+=======
+            	if(operator != '\0') {
+            		sb.append(operator);
+            	}
+>>>>>>> 72e6893 UPDATE: Better comparison for null-Byte
                 sb.append(b.toPlainString());
             }
             representation = sb.toString();
